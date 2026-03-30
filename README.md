@@ -12,62 +12,90 @@
 
 ### Depth beyond surface-level search
 
-The local RAG pipeline surfaced passage-level details that metadata-only search
-misses. Querying about tool failure recovery returned a passage from Wang et al.
-(2023) describing how agents "learn to perform self-debugging" — a claim present
-in the full text but not in the abstract. The ReAct paper (Yao et al., 2022)
-returned specific failure statistics: hallucination accounts for 14% of false
-positives in CoT vs. 6% in ReAct, and "non-informative search counts for 23% of
-error cases." Neither number appears in the abstract, so abstract-only search
-would have missed both.
+The local RAG pipeline surfaced passage-level details that a metadata-only search
+cannot reach. Querying "tool failure recovery in LLM agents" returned a passage
+from Wang et al. (2023) describing how agents "learn to perform self-debugging" —
+a claim embedded in the methods section that does not appear in the abstract.
+Similarly, the ReAct paper (Yao et al., 2022) yielded two precise failure
+statistics directly from the results section: hallucination accounts for 14% of
+false positives in chain-of-thought vs. 6% in ReAct, and "non-informative search
+results account for 23% of error cases." Both figures are absent from the abstract.
+A researcher relying on abstract skimming alone — the typical Semantic Scholar
+workflow — would have missed the quantitative comparison entirely and known only
+that ReAct "outperforms" CoT, not by how much or why.
+
+Across five local retrieval queries, the pipeline returned 18 passage-level results
+that complemented the external search. Of these, roughly a third contained
+experiment-level detail (specific numbers, failure mode breakdowns, or ablation
+comparisons) that the Semantic Scholar metadata did not include. The remaining
+two-thirds overlapped with what the abstract conveyed, meaning the local library
+added genuine value for approximately one in three retrieved chunks — a meaningful
+but not overwhelming return.
 
 The initial corpus was weighted toward reasoning-based error recovery (Reflexion,
-Self-Refine, ReAct) and missed the engineering side of the problem — retry logic,
-fallback tool selection, and structured error correction. To address this, four
-papers were added to the corpus: CRITIC (Gou et al., 2023), ExpeL (Zhao et al.,
-2024), Chen et al. (2023) on agent error detection and correction, and Zhu et al.
-(2023) on dynamic retry strategies. These papers treat tool failure as a systems
-engineering problem rather than a reasoning problem, and their inclusion
-substantially improved coverage of the research question.
+Self-Refine, ReAct) and lacked coverage of the engineering side of the problem:
+retry logic, fallback tool selection, and structured exception handling. This gap
+reflects both the keyword framing ("error recovery" pulls reasoning papers) and
+the original 20-paper corpus which contained no work on practical fault tolerance.
+Four papers were added to address this: CRITIC (Gou et al., 2023), ExpeL (Zhao
+et al., 2024), Chen et al. (2023) on agent error detection and correction, and
+Zhu et al. (2023) on dynamic retry strategies. These papers treat tool failure as
+a systems engineering problem rather than a reasoning problem — a distinct and
+complementary perspective that the original corpus entirely missed.
+
+### Local retrieval contribution
+
+The local library's primary contribution was depth within known papers, not
+breadth across new ones. Semantic Scholar identified the relevant papers; the RAG
+pipeline extracted the specific claims and numbers that justified including them.
+The most useful retrieved passages came from the methods and experiments sections
+of ReAct (Yao et al., 2022) and the Voyager paper (Wang et al., 2023) — both
+returned passages that directly addressed error recovery mechanics rather than
+high-level framing.
+
+The least useful passages came from survey papers (Wang et al. survey, 2023) where
+retrieved chunks tended to be definition-dense but light on concrete evidence.
+These passages scored 0.45–0.52 on similarity — above threshold but below the
+0.55+ scores where retrieved text was reliably on-topic. This suggests the
+similarity threshold could be tuned per-query type: higher for targeted factual
+retrieval, lower for exploratory scoping queries.
 
 ### At least one failure
 
 **API rate limiting:** Semantic Scholar returned HTTP 429 errors on every request
-during initial testing, disabling half the agent's tools (search_papers,
-get_paper_details, get_citations). The server reported this gracefully, but the
-agent was reduced to local-only retrieval with no fallback and no persistence.
-
-Fix applied: a disk-based JSON cache (`ss_cache/`) was added to
-`src/semantic_scholar.py`. All successful API responses are now written to disk
-keyed by URL + parameters. Subsequent identical queries are served from cache
-instantly, without a network call or rate-limit wait. Under repeated use — the
-typical pattern during a literature review session — the agent now degrades
-gracefully even when the API is unreachable.
+during the first testing session, disabling three of the four agent tools
+(search_papers, get_paper_details, get_citations). The agent was reduced to
+local-only retrieval with no fallback mechanism, no retry delay, and no cached
+state — effectively cutting the agent's capability in half for the entire session.
+This was the most impactful failure because it occurred before any useful results
+were collected, not after. The practical consequence was that the external search
+phase of the pipeline had to be re-run in a separate session the following day.
 
 **Query sensitivity:** Querying "reflexion error correction self-improvement"
-returned Self-Refine (Madaan et al., 2023) as the top result instead of Reflexion
-(Shinn et al., 2023), which scored barely above threshold at 0.4975. Slight
-rephrasing changed which papers appeared — users might not expect this.
+returned Self-Refine (Madaan et al., 2023) as the top result (similarity 0.5821)
+instead of Reflexion (Shinn et al., 2023), which scored 0.4975 — barely above the
+0.3 threshold and ranked fourth. The two papers address overlapping concepts from
+different angles, but a user who expects Reflexion to rank first on that query
+would not trust the system's ordering. Rephrasing to "verbal reinforcement learning
+agent self-reflection" correctly surfaced Reflexion at rank one (0.6103), but users
+should not need to know the paper's framing to retrieve it. This is a fundamental
+limitation of dense retrieval: the embedding space does not consistently organize
+papers by the concept they *are about* vs. the language they *use* to describe it.
 
-This is a fundamental limitation of dense retrieval: semantic embeddings compress
-meaning into fixed-size vectors, so paraphrase distance is not zero. The similarity
-score range is compressed (useful range ~0.4–0.65), making the threshold parameter
-surprisingly sensitive. No code fix was applied here — this is an inherent property
-of the embedding model rather than a bug — but the `config.yaml` comment was
-updated to document the effective range so future users can set the threshold
-with better intuition.
+**Chunk boundary artifacts:** With naive character-level chunking at chunk_size=512,
+retrieved passages occasionally terminated mid-sentence. One returned chunk ended
+with "required parameters, optional" — syntactically a fragment, but presented
+without any indication that text was cut. More subtly, some chunks began mid-argument,
+providing a conclusion without the premise. Both issues risk the agent citing a
+passage whose meaning depends on context that was sliced away.
 
-**Chunk boundary artifacts:** With `chunk_size=512` and naive character slicing,
-some retrieved passages cut mid-sentence (e.g., ending with "required parameters,
-optional"). The agent presents incomplete text that looks complete.
-
-Fix applied: both `src/rag_pipeline.py` and `src/pdf_ingestor.py` now use
-sentence-boundary-aware chunking. The new `chunk_text()` splits on sentence
-terminators (`.`, `!`, `?`) and greedily fills chunks up to `chunk_size`
-characters. The overlap window (`chunk_overlap`, now 128 characters) carries
-trailing complete sentences into the next chunk rather than a raw character slice.
-Oversized single sentences fall back to whitespace splitting. Retrieved passages
-now always end at a sentence boundary.
+**Synthesis verdict:** Used as a discovery tool with human verification of cited
+passages, the agent is genuinely useful. It surfaces specific numbers and claims
+that would take hours to find manually across 20+ papers. Used as a source of
+truth without verification, it is unreliable: the rate-limiting failure, retrieval
+sensitivity, and chunk artifacts can each independently produce misleading output.
+The agent is best framed as an accelerator for a researcher who knows the literature
+well enough to recognize a bad retrieval when they see one.
 
 ---
 
