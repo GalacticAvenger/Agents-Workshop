@@ -12,9 +12,9 @@
 
 ### Depth beyond surface-level search
 
-The local RAG pipeline surfaced passage-level details that metadata-only search misses. Querying about tool failure recovery returned a passage from Wang et al. (2023) describing how agents "learn to perform self-debugging" — a claim in the full text but not the abstract. The ReAct paper (Yao et al., 2022) returned specific failure statistics: hallucination accounts for 14% of false positives in CoT vs. 6% in ReAct, and "non-informative search counts for 23% of error cases." These numbers wouldn't surface from abstract skimming alone.
+The local rag pipeline used passage level detailed that the metadata only search missed. quierying about tool failure recovered gave me a passage from Wang et al. that showed how agents learn to perform self debugging a claim in the full text but not the abstract.tye react paper returned speciic failure stats about haullucinations which wouldnt be available whatsover from just skimming the abstract. 
 
-The agent missed papers on engineering-oriented error handling (retry logic, fallback tools). The corpus and keyword framing both favor reasoning-based approaches over practical ones.
+However the agent seemed to not do well and missed paperes on engineering oriented error handling. the corpus and keyword framing both favored reasoning based approaches over practice ones.
 
 ### At least one failure
 
@@ -32,18 +32,18 @@ For real work: usable as a discovery tool with guardrails, not as a source of tr
 
 ### 3.1 Build process
 
-The main design decision was RAG parameters. chunk_size=512 (~2-3 sentences) balances context vs. precision. I considered 1024 for more context but it would return more irrelevant text alongside relevant portions. The similarity_threshold of 0.3 was deliberately permissive — relevant content scores 0.45-0.65, so 0.3 errs on recall over precision.
+the main decision i made was the rag params. i had to figure out the chunk size to have the balance between context and precision. i considered 1024 for more context but it would give me more irrelevant text so i used 512 instead. the similarity threshold of .3 was also deliberately permissive and gave relevant content scores of .45 to .65. 
 
-Claude implemented chunk_text() and retrieve() correctly on the first try — the sliding window and ChromaDB query pattern are straightforward. Setup required iteration: the embedding model download timed out once, and .mcp.json needed the Python path updated to use the venv.
+Claude implemented chunk_text() and retrieve() correctly on the first try. Setup required iteration where the embedding model download timed out once, and .mcp.json needed the Python path updated to use the venv.
 
 ### 3.2 System prompt engineering
 
-I compared "default" and "concise" prompts. Default starts with Semantic Scholar, uses multiple tool calls, and produces prose reviews with thematic grouping. Concise flips the order (local library first), limits to two tool calls total, and requires bullet-point output.
+I compared "default" and "concise" prompts. default start with semantic scholar, uses multiple tool calls, and produce prose reviewes with thematic grouping. conside flips it and limits to two tool calls and forces bullet point output.
 
-The concise prompt produced higher information density per token. It also had fewer hallucination opportunities since it made fewer claims. The default prompt was better for comprehensive literature review writing. I'd define "better" as information density, so concise wins — but for a grad student writing a review section, default is more useful.
+the conside prompt had higher information density per token and had fewer hallucinations and the default was better for comprehensive literature review writing. i thought conside was better as it was more information dense.
 
 ### 3.4 Architecture limitations
 
-To make this viable for real work: (1) add a caching layer for Semantic Scholar results so the system works during rate limiting, (2) replace character-level chunking with sentence-boundary-aware splitting, (3) add the ability to incrementally add papers without full re-ingestion.
+for this to work for real work i would add a caching layer for semantic scholar results so the system works during rate limiting. id also replace character level chunking with sentence boundary aware splitting to make results much better. finally id add the ability to add papers incrementally without full reingestion.
 
-The biggest surprise was how sensitive retrieval is to query phrasing. Semantic embeddings don't handle paraphrasing as well as expected — querying "reflexion error correction" vs. "agent self-improvement from failure" returned different top results for the same concept. The similarity score range is also very compressed (useful range ~0.4-0.65), making the threshold parameter surprisingly sensitive.
+the biggest surprise was how sensitive retrieval is to query phrasing. semantic embedding didnt handle paraphrasing very well querying reflexion error correction vs agent self improvement from failure which returned insanely dif results for the same concept. the similarity score also was super compressed so it made the threshold param super sensitive.
