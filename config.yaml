@@ -18,7 +18,7 @@ rag:
   # How many characters of overlap between consecutive chunks.
   # Overlap helps avoid cutting sentences/ideas at boundaries.
   # Must be less than chunk_size.
-  chunk_overlap: 64
+  chunk_overlap: 128
 
   # --- Retrieval ---
   # How many chunks to retrieve per query.
@@ -51,9 +51,11 @@ semantic_scholar:
   # Default number of papers to return from search
   default_limit: 10
 
-  # Seconds to wait between API requests to respect rate limits
-  # Free tier only gives ~1 request/second, so don't set below 1.0.
-  rate_limit_delay: 1.1
+  # Seconds to wait between API requests to respect rate limits.
+  # Free tier allows ~1 request/second. 1.5s gives headroom under load.
+  # Note: responses are cached in ss_cache/ so rate limits rarely apply
+  # to repeated queries — only the first call hits the network.
+  rate_limit_delay: 1.5
 
 agent:
   # Which prompt template to use (key from prompts/templates.py)

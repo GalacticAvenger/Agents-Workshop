@@ -14,6 +14,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import hashlib
 import pathlib
@@ -46,29 +47,95 @@ def extract_text_from_pdf(pdf_path: pathlib.Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Chunking (students will implement a similar function in rag_pipeline.py)
+# Chunking — sentence-boundary-aware
 # ---------------------------------------------------------------------------
 
 def chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
     """
-    Split text into overlapping fixed-size character chunks.
+    Split text into overlapping chunks that respect sentence boundaries.
 
-    This simple approach splits on character boundaries. Note that this
-    may cut words in half — a production system would split on sentence
-    or paragraph boundaries instead.
+    Unlike naive character slicing, this function splits on sentence
+    terminators (.  !  ?) so retrieved chunks always contain complete
+    sentences. This produces more coherent passages and better embeddings.
+
+    Oversized single sentences (longer than chunk_size) are split on the
+    nearest whitespace as a fallback — no text is ever silently dropped.
+
+    Args:
+        text:          Full document text to chunk.
+        chunk_size:    Target maximum character length per chunk.
+        chunk_overlap: Approximate character overlap between consecutive
+                       chunks, applied at sentence granularity.
+
+    Returns:
+        List of non-empty string chunks.
     """
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
     if chunk_overlap < 0 or chunk_overlap >= chunk_size:
         raise ValueError("chunk_overlap must be >= 0 and < chunk_size")
+    if not text:
+        return []
 
-    chunks = []
-    step = chunk_size - chunk_overlap
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start += step
+    # Split into sentences on . ! ? followed by whitespace
+    raw_sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    sentences = [s.strip() for s in raw_sentences if s.strip()]
+
+    chunks: list[str] = []
+    current_sentences: list[str] = []
+    current_len = 0
+
+    i = 0
+    while i < len(sentences):
+        sentence = sentences[i]
+
+        # Oversized sentence: flush buffer then hard-split on whitespace
+        if len(sentence) > chunk_size:
+            if current_sentences:
+                chunks.append(" ".join(current_sentences))
+                current_sentences = []
+                current_len = 0
+            start = 0
+            while start < len(sentence):
+                end = start + chunk_size
+                if end < len(sentence):
+                    space = sentence.rfind(" ", start, end)
+                    if space > start:
+                        end = space
+                chunks.append(sentence[start:end])
+                start = end
+            i += 1
+            continue
+
+        separator = " " if current_sentences else ""
+        new_len = current_len + len(separator) + len(sentence)
+
+        if new_len <= chunk_size:
+            current_sentences.append(sentence)
+            current_len = new_len
+            i += 1
+        else:
+            if current_sentences:
+                chunks.append(" ".join(current_sentences))
+
+            # Overlap: carry forward trailing sentences up to chunk_overlap chars
+            overlap_sentences: list[str] = []
+            overlap_len = 0
+            for s in reversed(current_sentences):
+                candidate = len(s) + (1 if overlap_sentences else 0)
+                if overlap_len + candidate <= chunk_overlap:
+                    overlap_sentences.insert(0, s)
+                    overlap_len += candidate
+                else:
+                    break
+
+            current_sentences = overlap_sentences
+            current_len = overlap_len
+            # Reprocess current sentence with the refreshed buffer
+
+    if current_sentences:
+        chunks.append(" ".join(current_sentences))
+
     return chunks
 
 

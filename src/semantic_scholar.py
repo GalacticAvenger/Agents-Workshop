@@ -2,8 +2,19 @@
 semantic_scholar.py — Semantic Scholar Graph API client (pre-implemented)
 
 You do not need to modify this file for the assignment — it is fully implemented.
+
+Caching:
+    All API responses are cached to disk (ss_cache/ directory, JSON files).
+    Cache keys are derived from the request URL + parameters. This means the
+    system continues to work when the Semantic Scholar free tier rate-limits
+    you — subsequent identical queries are served from disk instantly.
+
+    To clear the cache and force fresh API calls, delete the ss_cache/ folder.
 """
 
+import hashlib
+import json
+import pathlib
 import time
 import httpx
 from typing import Optional
@@ -35,9 +46,41 @@ CITATION_FIELDS = [
     "citationCount",
 ]
 
+# ---------------------------------------------------------------------------
+# Disk cache helpers
+# ---------------------------------------------------------------------------
+
+_CACHE_DIR = pathlib.Path("ss_cache")
+
+
+def _cache_key(url: str, params: dict) -> str:
+    """Deterministic cache key from URL + sorted params."""
+    canonical = url + "|" + "&".join(
+        f"{k}={v}" for k, v in sorted(params.items())
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _load_cache(key: str) -> Optional[dict]:
+    """Return cached JSON dict, or None if not cached."""
+    path = _CACHE_DIR / f"{key}.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+
+def _save_cache(key: str, data: dict) -> None:
+    """Persist a JSON-serialisable dict to disk."""
+    _CACHE_DIR.mkdir(exist_ok=True)
+    path = _CACHE_DIR / f"{key}.json"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
 
 class SemanticScholarClient:
-    def __init__(self, base_url: str, rate_limit_delay: float = 1.1):
+    def __init__(self, base_url: str, rate_limit_delay: float = 1.5):
         self.base_url = base_url.rstrip("/")
         self.rate_limit_delay = rate_limit_delay
         self._last_request_time = 0.0
@@ -48,6 +91,25 @@ class SemanticScholarClient:
         if elapsed < self.rate_limit_delay:
             time.sleep(self.rate_limit_delay - elapsed)
         self._last_request_time = time.time()
+
+    def _get(self, url: str, params: dict) -> dict:
+        """
+        Perform a GET request with caching and rate limiting.
+
+        Cache hit  → return immediately (no network call, no rate-limit wait).
+        Cache miss → wait for rate limit, fetch, cache, and return.
+        """
+        key = _cache_key(url, params)
+        cached = _load_cache(key)
+        if cached is not None:
+            return cached
+
+        self._wait_for_rate_limit()
+        response = httpx.get(url, params=params, timeout=15.0)
+        response.raise_for_status()
+        data = response.json()
+        _save_cache(key, data)
+        return data
 
     def search_papers(
         self,
@@ -70,8 +132,6 @@ class SemanticScholarClient:
         Returns:
             List of paper dicts with title, authors, year, abstract, etc.
         """
-        self._wait_for_rate_limit()
-
         fields = SEARCH_FIELDS if include_abstracts else [
             f for f in SEARCH_FIELDS if f != "abstract"
         ]
@@ -86,13 +146,7 @@ class SemanticScholarClient:
         if fields_of_study:
             params["fieldsOfStudy"] = ",".join(fields_of_study)
 
-        response = httpx.get(
-            f"{self.base_url}/paper/search",
-            params=params,
-            timeout=15.0,
-        )
-        response.raise_for_status()
-        data = response.json()
+        data = self._get(f"{self.base_url}/paper/search", params)
         return [_format_paper(p) for p in data.get("data", [])]
 
     def get_paper(self, paper_id: str) -> dict:
@@ -106,15 +160,9 @@ class SemanticScholarClient:
         Returns:
             Paper dict with full metadata, references, and citations.
         """
-        self._wait_for_rate_limit()
-
-        response = httpx.get(
-            f"{self.base_url}/paper/{paper_id}",
-            params={"fields": ",".join(DETAIL_FIELDS)},
-            timeout=15.0,
-        )
-        response.raise_for_status()
-        return _format_paper(response.json(), include_relations=True)
+        params = {"fields": ",".join(DETAIL_FIELDS)}
+        data = self._get(f"{self.base_url}/paper/{paper_id}", params)
+        return _format_paper(data, include_relations=True)
 
     def get_citations(
         self,
@@ -137,18 +185,13 @@ class SemanticScholarClient:
         if direction not in ("references", "citations"):
             raise ValueError("direction must be 'references' or 'citations'")
 
-        self._wait_for_rate_limit()
-
-        response = httpx.get(
-            f"{self.base_url}/paper/{paper_id}/{direction}",
-            params={
-                "fields": ",".join(CITATION_FIELDS),
-                "limit": min(limit, 1000),
-            },
-            timeout=15.0,
+        params = {
+            "fields": ",".join(CITATION_FIELDS),
+            "limit": min(limit, 1000),
+        }
+        data = self._get(
+            f"{self.base_url}/paper/{paper_id}/{direction}", params
         )
-        response.raise_for_status()
-        data = response.json()
 
         # The API wraps each entry in a "citedPaper" or "citingPaper" key
         wrapper_key = "citedPaper" if direction == "references" else "citingPaper"

@@ -6,6 +6,7 @@ text chunks from the local PDF library. See chunk_text() and retrieve() for
 the core logic; both are called by the MCP server via query_library().
 """
 
+import re
 import pathlib
 import yaml
 import chromadb
@@ -54,25 +55,106 @@ class RAGPipeline:
     @staticmethod
     def chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
         """
-        Split *text* into overlapping fixed-size character chunks.
+        Split *text* into overlapping chunks that respect sentence boundaries.
 
-        Each chunk is at most chunk_size characters. Consecutive chunks overlap
-        by chunk_overlap characters; the step between chunk starts is
-        (chunk_size - chunk_overlap). The last chunk may be shorter.
+        Strategy:
+          1. Split the text into sentences using punctuation heuristics.
+          2. Greedily accumulate sentences into a chunk until adding the next
+             sentence would exceed chunk_size characters.
+          3. When a chunk is full, start the next chunk by backtracking
+             chunk_overlap characters worth of sentences (overlap window).
+          4. If a single sentence exceeds chunk_size, it is split on the
+             nearest whitespace so no text is ever dropped.
 
-        Example:
-            chunk_text("abcdefghij", chunk_size=4, chunk_overlap=1)
-            # step = 3 → ["abcd", "defg", "ghij", "j"]
+        This avoids the mid-sentence cuts produced by naive character slicing.
+        Results are more coherent and produce better embedding quality.
+
+        Args:
+            text:          The full document text to chunk.
+            chunk_size:    Target maximum character length per chunk.
+            chunk_overlap: Approximate character overlap between consecutive
+                           chunks (applied at the sentence level).
+
+        Returns:
+            List of non-empty string chunks.
         """
         if not text:
             return []
 
-        chunks = []
-        step = chunk_size - chunk_overlap
-        start = 0
-        while start < len(text):
-            chunks.append(text[start : start + chunk_size])
-            start += step
+        # ----------------------------------------------------------------
+        # Step 1 — sentence tokenisation via regex
+        # Splits after .  !  ?  followed by whitespace or end-of-string,
+        # keeping the terminator attached to the preceding sentence.
+        # ----------------------------------------------------------------
+        raw_sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+        sentences = [s.strip() for s in raw_sentences if s.strip()]
+
+        # ----------------------------------------------------------------
+        # Step 2 — greedy accumulation into chunk_size windows
+        # ----------------------------------------------------------------
+        chunks: list[str] = []
+        current_sentences: list[str] = []
+        current_len = 0
+
+        i = 0
+        while i < len(sentences):
+            sentence = sentences[i]
+
+            # Edge case: sentence alone exceeds chunk_size — hard-split it
+            if len(sentence) > chunk_size:
+                # Flush current buffer first
+                if current_sentences:
+                    chunks.append(" ".join(current_sentences))
+                    current_sentences = []
+                    current_len = 0
+
+                # Split the oversized sentence on whitespace
+                start = 0
+                while start < len(sentence):
+                    end = start + chunk_size
+                    if end < len(sentence):
+                        # Retreat to nearest space to avoid mid-word splits
+                        space = sentence.rfind(" ", start, end)
+                        if space > start:
+                            end = space
+                    chunks.append(sentence[start:end])
+                    start = end
+                i += 1
+                continue
+
+            # Will adding this sentence exceed the limit?
+            separator = " " if current_sentences else ""
+            new_len = current_len + len(separator) + len(sentence)
+
+            if new_len <= chunk_size:
+                current_sentences.append(sentence)
+                current_len = new_len
+                i += 1
+            else:
+                # Flush the current chunk
+                if current_sentences:
+                    chunks.append(" ".join(current_sentences))
+
+                # Build the overlap window: include trailing sentences whose
+                # combined length fits within chunk_overlap characters
+                overlap_sentences: list[str] = []
+                overlap_len = 0
+                for s in reversed(current_sentences):
+                    candidate = len(s) + (1 if overlap_sentences else 0)
+                    if overlap_len + candidate <= chunk_overlap:
+                        overlap_sentences.insert(0, s)
+                        overlap_len += candidate
+                    else:
+                        break
+
+                current_sentences = overlap_sentences
+                current_len = overlap_len
+                # Do NOT advance i — reprocess this sentence with the new buffer
+
+        # Flush any remaining sentences
+        if current_sentences:
+            chunks.append(" ".join(current_sentences))
+
         return chunks
 
     def retrieve(self, query: str) -> list[dict]:

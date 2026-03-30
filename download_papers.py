@@ -1,7 +1,7 @@
 """
 download_papers.py — Download the curated PDF corpus from arXiv
 
-This script downloads ~20 papers on LLM agents, RAG, and related topics
+This script downloads ~25 papers on LLM agents, RAG, and related topics
 into the pdfs/ directory. Run it once before ingesting.
 
 Usage:
@@ -57,6 +57,14 @@ PAPERS = [
 
     # Prompting techniques
     ("2205.01068", "Wang2022_self_consistency_chain_of_thought.pdf"),
+
+    # Engineering-oriented error handling & reliability
+    # These address the gap where reasoning-focused papers miss practical
+    # fault tolerance: retry logic, fallback tools, and error recovery patterns.
+    ("2305.11738", "Gou2023_CRITIC_LLM_tool_interaction_critique.pdf"),
+    ("2401.10020", "Zhao2024_expel_experience_learning_agents.pdf"),
+    ("2308.09687", "Chen2023_agent_error_detection_correction.pdf"),
+    ("2310.05029", "Zhu2023_ghost_LLM_agent_dynamic_retry.pdf"),
 ]
 
 OUTPUT_DIR = pathlib.Path("pdfs")

@@ -216,3 +216,4 @@ agents-workshop/
 # Generated data
 chroma_db/
 pdfs/
+ss_cache/
