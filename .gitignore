@@ -209,3 +209,10 @@ marimo/_lsp/
 __marimo__/
 .DS_Store
 Prompt.txt
+
+# Virtual environment
+agents-workshop/
+
+# Generated data
+chroma_db/
+pdfs/

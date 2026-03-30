@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "literature-review": {
-      "command": "python",
+      "command": "./agents-workshop/bin/python",
       "args": ["src/mcp_server.py"]
     }
   }
