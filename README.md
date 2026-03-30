@@ -1,238 +1,49 @@
-# AI Applications Workshop — Agentic AI Assignment
+# Writeup — Agentic AI Assignment
 
-## Overview
-
-This repository is a complete reference example of an agentic AI system that
-conducts literature reviews. It combines two information sources:
-
-- **Semantic Scholar** — a large database of academic paper metadata, searched via API.
-- **Local PDF library** — ~20 full-text papers on LLM agents and RAG, searched via
-  retrieval-augmented generation (RAG).
-
-The system runs as an MCP server inside Claude Code, giving Claude access to
-these sources as callable tools during a conversation.
-
-**Your assignment is to build something like this yourself** by using Claude Code
-as your assistant. You may build a literature review agent (following
-the architecture here) or a different agent entirely. Then, you will apply it to a
-real problem and critically evaluate whether it works.
+**Name:** Samuel Meddin
+**Date:** 2026-03-30
+**Agent built:** Literature review agent (Option A — Semantic Scholar + local PDF RAG)
 
 ---
 
-## Estimated Time
+## Part 2: Task Analysis
 
-| Section | Time |
-|---|---|
-| Setup (running this example) | ~30 min |
-| Part 1 — Build your agent | ~2–3.5 hrs |
-| Part 2 — Research question / task analysis | ~90 min |
-| Part 3 — Write-up | ~60 min |
-| **Total** | **~5–6.5 hours** |
+**Research question:** How do LLM agents handle tool failures and error recovery?
 
----
+### Depth beyond surface-level search
 
-## Running This Example
+The local RAG pipeline surfaced passage-level details that metadata-only search misses. Querying about tool failure recovery returned a passage from Wang et al. (2023) describing how agents "learn to perform self-debugging" — a claim in the full text but not the abstract. The ReAct paper (Yao et al., 2022) returned specific failure statistics: hallucination accounts for 14% of false positives in CoT vs. 6% in ReAct, and "non-informative search counts for 23% of error cases." These numbers wouldn't surface from abstract skimming alone.
 
-Before building your own agent, run this one to understand what you're aiming for.
+The agent missed papers on engineering-oriented error handling (retry logic, fallback tools). The corpus and keyword framing both favor reasoning-based approaches over practical ones.
 
-### 1. Create and activate a virtual environment
+### At least one failure
 
-**macOS / Linux:**
-```bash
-python -m venv agents-workshop
-source agents-workshop/bin/activate
-```
+**API rate limiting:** Semantic Scholar returned 429 errors on every request during testing, disabling half the agent's tools (search_papers, get_paper_details, get_citations). The server handled this gracefully with error messages, but the agent was reduced to local-only retrieval with no fallback or cache.
 
-**Windows (PowerShell):**
-```powershell
-python -m venv agents-workshop
-.\agents-workshop\Scripts\Activate.ps1
-```
+**Query sensitivity:** Querying "reflexion error correction self-improvement" returned Self-Refine (Madaan et al., 2023) as the top result instead of Reflexion (Shinn et al., 2023), which scored barely above threshold at 0.4975. Slight rephrasing changed which papers appeared — users might not expect this.
 
-### 2. Install dependencies
+**Chunk boundary artifacts:** With chunk_size=512, some retrieved passages cut mid-sentence (e.g., ending with "required parameters, optional"). The agent presents incomplete text that looks complete.
 
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Download the PDF corpus
-
-```bash
-python download_papers.py
-```
-
-### 4. Build the vector database
-
-```bash
-python src/pdf_ingestor.py
-```
-
-### 5. Register the MCP server with Claude Code
-
-```bash
-claude mcp add literature-review -- python src/mcp_server.py
-```
-
-> **VSCode users:** The `.mcp.json` file in this repo configures the server
-> automatically. Replace `"python"` with the full path to your venv Python if
-> the server fails to start:
-> - macOS/Linux: `"./agents-workshop/bin/python"`
-> - Windows: `"./agents-workshop/Scripts/python.exe"`
-
-### 6. Verify the server is running
-
-Start a Claude Code session and ask:
-
-> "List the tools you have access to."
-
-You should see four tools: `search_papers`, `get_paper_details`,
-`query_local_library`, and `get_citations`. Then try:
-
-> "Search Semantic Scholar for 'retrieval augmented generation'."
-
-If you get paper results, your setup is complete.
+For real work: usable as a discovery tool with guardrails, not as a source of truth. Local citations can be verified; external results are leads to check.
 
 ---
 
-## Part 1 — Build Your Agent *(~2.0–3.5 hrs)*
-
-Your goal is to build a working agentic system as an MCP server, using Claude
-Code to help you write the code. The two core components are:
-
-1. **A document ingestion pipeline** — reads files (PDFs, text, or whatever fits
-   your domain), chunks them into pieces, embeds them, and stores them in a
-   vector database
-2. **An MCP server** — exposes tools that Claude can call to search that database
-   and any external APIs you choose
-
-### Option A — Literature review agent
-
-Build a version of this system yourself. Use this repo as a reference for what the end
-result should look like, but write the code from scratch with Claude's help.
-
-Key questions to work through with Claude:
-- What does a literature review workflow actually require step by step? Which steps
-  can be automated, and which require human judgment?
-- Why split into four separate tools rather than one? How does tool granularity
-  affect what the agent can do?
-- How should text be chunked for retrieval — by character, sentence, or paragraph?
-
-You do not need to reproduce this system exactly — different design choices are
-encouraged and worth discussing in your write-up.
-
-### Option B — Agent of your choice
-
-Build a different kind of agent that does something useful for you. Some examples:
-
-- A codebase assistant that ingests a large repo and answers questions about it
-- A customer support agent that queries a product documentation database
-- A data analysis agent that reads CSV/JSON files and runs queries
-- A legal or policy research agent over a domain-specific document corpus
-
-Requirements for either option:
-- At least one tool that does **local document retrieval** (RAG over files you
-  provide, not just API calls)
-- At least one tool that calls an **external API or service**
-- A **configurable system prompt** with at least two variants that produce
-  observably different agent behavior
-- The server must run successfully in Claude Code.
-
-This is an AI-assisted implementation assignment, so you are expected to use Claude
-heavily. That said, you should be able to explain the various components of your 
-system at a high level.
-
----
-
-## Part 2 — Research Question / Task Analysis *(~90 min)*
-
-Apply your agent to a real problem and evaluate whether it actually works. You will detail your findings in a `writeup.md` file.
-
-### Step 1: Choose a question or task
-
-If you built a literature review agent, pick a research question you genuinely care
-about that is specific enough that a good review would take a few hours to write.
-
-Examples:
-- "How do LLM agents handle tool failures and error recovery?"
-- "What evaluation benchmarks exist for multi-agent coordination?"
-- "How has RAG system design changed as context windows have grown?"
-
-If you built a different agent, pick an equivalent task that represents a
-non-trivial use of your system.
-
-### Step 2: Run the full pipeline
-
-Work through this sequence in Claude Code and save the outputs at each step:
-
-1. **External search** — use your API-based tool to find relevant sources
-2. **Identify key results** — ask Claude to identify the 3–5 most central sources
-   and explain why; follow at least one connection between them (citation chain,
-   related document, etc.)
-3. **Local retrieval** — query your vector database for relevant passages; note
-   whether they go beyond what the external search returned
-4. **Synthesize** — ask Claude to produce a final answer (review, analysis, report)
-   integrating both sources, with citations or attribution
-
-A worked example of this workflow is in `examples/research_question_analysis.md`.
-
-### Step 3: Evaluate the output
-
-In your `writeup.md`, add a **"Part 2: Task Analysis"** section addressing two of the three topics:
-
-**Depth beyond surface-level search**
-What did your agent surface that a quick web/API search alone would have missed?
-Did it miss anything?
-
-**Local retrieval contribution**
-Which passages from your vector database actually made it into the final output?
-Were they more useful than the external API results, or largely redundant?
-
-**Failures**
-Describe a case where the system misled you or failed: a hallucinated claim, a
-missed key result, an irrelevant retrieved chunk, or a synthesis that sounded
-authoritative but was shallow. Would you trust this system for real work?
-
----
-
-## Part 3 — Reflection Write-Up *(~60 min)*
-
-Add a third part to your `writeup.md` file. Address three of the following questions:
+## Part 3: Reflection
 
 ### 3.1 Build process
-- What was a major design decision you had to make? How did you decide to take
-  a particular course of action.
-- What did Claude get right on the first try? Where did you have to push back,
-  correct it, or iterate?
+
+The main design decision was RAG parameters. chunk_size=512 (~2-3 sentences) balances context vs. precision. I considered 1024 for more context but it would return more irrelevant text alongside relevant portions. The similarity_threshold of 0.3 was deliberately permissive — relevant content scores 0.45-0.65, so 0.3 errs on recall over precision.
+
+Claude implemented chunk_text() and retrieve() correctly on the first try — the sliding window and ChromaDB query pattern are straightforward. Setup required iteration: the embedding model download timed out once, and .mcp.json needed the Python path updated to use the venv.
 
 ### 3.2 System prompt engineering
-- What two prompt variants did you implement? How did they differ in behavior? 
-  Which produced better output, and how are you defining "better"?
+
+I compared "default" and "concise" prompts. Default starts with Semantic Scholar, uses multiple tool calls, and produces prose reviews with thematic grouping. Concise flips the order (local library first), limits to two tool calls total, and requires bullet-point output.
+
+The concise prompt produced higher information density per token. It also had fewer hallucination opportunities since it made fewer claims. The default prompt was better for comprehensive literature review writing. I'd define "better" as information density, so concise wins — but for a grad student writing a review section, default is more useful.
 
 ### 3.4 Architecture limitations
-- What would you need to change to make this viable for a real workflow?
-- What did you learn about the limits of RAG-based agents that you didn't
-  expect before building one?
 
----
+To make this viable for real work: (1) add a caching layer for Semantic Scholar results so the system works during rate limiting, (2) replace character-level chunking with sentence-boundary-aware splitting, (3) add the ability to incrementally add papers without full re-ingestion.
 
-## Submission Checklist
-
-- [ ] Working MCP server registered in Claude Code
-- [ ] At least one local retrieval tool and one external API tool
-- [ ] At least two system prompt variants implemented and tested
-- [ ] `writeup.md` — all required questions completed
-
----
-
-## How This Example Was Built
-
-This reference system was built iteratively using Claude Code, starting from a
-single prompt:
-
-> "I want to build a literature review agent as an MCP server. It should combine
-> Semantic Scholar for paper discovery with local PDF retrieval using RAG. I want
-> configurable system prompts and tunable retrieval parameters. Ask me questions
-> to clarify this task."
-
-From there, the architecture was refined over several subsequent prompts to clarify
-tool design, chunking/retrieval logic, and iterate on the prompt templates.
+The biggest surprise was how sensitive retrieval is to query phrasing. Semantic embeddings don't handle paraphrasing as well as expected — querying "reflexion error correction" vs. "agent self-improvement from failure" returned different top results for the same concept. The similarity score range is also very compressed (useful range ~0.4-0.65), making the threshold parameter surprisingly sensitive.
